@@ -1,0 +1,253 @@
+from django.db import models
+from users.models import *
+from decimal import Decimal
+import os
+from dateutil.relativedelta import relativedelta
+
+
+class PropertyCategory(models.Model):
+    property_category_id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=50, unique=True)
+
+    def __str__(self):
+        return self.name
+
+
+class PropertyType(models.Model):
+    property_type_id = models.AutoField(primary_key=True)
+    category = models.ForeignKey(PropertyCategory, on_delete=models.CASCADE, related_name='types')
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return f"{self.category.name} - {self.name}"
+
+
+class Amenity(models.Model):
+    amenity_id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
+    
+
+
+class BookingAmountSlab(models.Model):
+    min_value = models.DecimalField(max_digits=15, decimal_places=2)
+    max_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # null means "above"
+    booking_amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    def __str__(self):
+        if self.max_value:
+            return f"{self.min_value} - {self.max_value}: ₹{self.booking_amount}"
+        else:
+            return f"{self.min_value}+ : ₹{self.booking_amount}"
+
+
+
+class Property(models.Model):
+    LOOKING_TO_CHOICES = [
+        ('sell', 'Sell'),
+        ('rent', 'Rent / Lease'),
+        ('pg', 'PG'),
+    ]
+
+    FACING_CHOICES = [
+        ('east', 'East'),
+        ('west', 'West'),
+        ('north', 'North'),
+        ('south', 'South'),
+        ('north_east', 'North-East'),
+        ('north_west', 'North-West'),
+        ('south_east', 'South-East'),
+        ('south_west', 'South-West'),
+    ]
+
+    property_id = models.AutoField(primary_key=True)
+    # Basic Info
+    looking_to = models.CharField(max_length=10, choices=LOOKING_TO_CHOICES,blank=True,null=True)
+    category = models.ForeignKey('PropertyCategory', on_delete=models.SET_NULL, null=True)
+    property_type = models.ForeignKey('PropertyType', on_delete=models.SET_NULL, null=True)
+    property_title = models.CharField(max_length=200, null=True, blank=True)
+    description = models.TextField(blank=True, null=True)
+    # Location Details
+    address = models.TextField(blank=True, null=True)
+    city = models.CharField(max_length=100,blank=True, null=True)
+    state = models.CharField(max_length=100,blank=True, null=True)
+    country = models.CharField(max_length=100,blank=True, null=True)
+    pin_code = models.CharField(max_length=15,blank=True, null=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
+    # Area and Dimensions
+    plot_area_sqft = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    builtup_area_sqft = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    length_ft = models.DecimalField(max_digits=7, decimal_places=2, blank=True, null=True)
+    breadth_ft = models.DecimalField(max_digits=7, decimal_places=2, blank=True, null=True)
+    # Property Structure
+    number_of_floors = models.PositiveIntegerField(blank=True, null=True)
+    number_of_open_sides = models.PositiveIntegerField(blank=True, null=True)
+    number_of_roads = models.PositiveIntegerField(blank=True, null=True)
+    number_of_bedrooms = models.PositiveIntegerField(blank=True, null=True)
+    number_of_balconies = models.PositiveIntegerField(blank=True, null=True)
+    number_of_bathrooms = models.PositiveIntegerField(blank=True, null=True)
+    road_width_1_ft = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+    road_width_2_ft = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+    # Facing
+    facing = models.CharField(max_length=20, choices=FACING_CHOICES, blank=True, null=True)
+    # Ownership & Financials
+    ownership_type = models.CharField(max_length=100, blank=True, null=True)
+    property_value = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True, default=0.00)
+    total_property_value = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True, default=0.00)
+    booking_amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True, default=0.00)
+    # Amenities
+    amenities = models.ManyToManyField(Amenity, blank=True)
+    # Additional Info
+    property_uniqueness = models.TextField(blank=True, null=True)
+    location_advantages = models.TextField(blank=True, null=True)
+    other_features = models.TextField(blank=True, null=True)
+    # Owner Details
+    owner_name = models.CharField(max_length=150, blank=True, null=True)
+    owner_contact = models.CharField(max_length=15, blank=True, null=True)
+    owner_email = models.EmailField(blank=True, null=True)
+    # User
+    user_id = models.ForeignKey(User, on_delete=models.CASCADE, related_name='properties_added')
+    role = models.CharField(max_length=20, blank=True, null=True)
+    username = models.CharField(max_length=100, blank=True, null=True)
+    referral_id = models.CharField(max_length=200, blank=True, null=True)
+    agent_commission = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True, default=0.00)
+    agent_commission_paid = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True,default=0.00)
+    agent_commission_balance = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True,default=0.00)
+    company_commission = models.DecimalField(max_digits=15,decimal_places=2,blank=True,null=True,default=0.00)
+    remaining_company_commission = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    total_company_commission_distributed = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    company_commission_status = models.CharField(max_length=100,default="unpaid")
+    # Flags
+    is_featured = models.BooleanField(default=False)
+    status = models.CharField(max_length=100,default="available")
+    approval_status = models.CharField(max_length=100,default="pending")
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    def save(self, *args, **kwargs):
+    # Step 1: Automatically calculate total property value
+        self.total_property_value = (
+            Decimal(self.agent_commission or 0) +
+            Decimal(self.company_commission or 0) +
+            Decimal(self.property_value or 0)
+        )
+
+        # Step 2: Get the booking amount slab that matches the total property value
+        matching_slab = BookingAmountSlab.objects.filter(
+            min_value__lte=self.total_property_value
+        ).filter(
+            models.Q(max_value__gte=self.total_property_value) | models.Q(max_value__isnull=True)
+        ).order_by('min_value').first()
+
+        # Step 3: Set the booking amount from the slab, or 0 if no slab is found
+        if matching_slab:
+            self.booking_amount = matching_slab.booking_amount
+        else:
+            self.booking_amount = Decimal(0)
+
+        # Step 4: Save the object
+        super().save(*args, **kwargs)
+
+
+    def __str__(self):
+        return f"{self.property_title or 'Untitled'} - {self.property_type.name if self.property_type else 'N/A'}"
+
+
+    
+def property_image_upload_to(instance, filename):
+    user_id = instance.property.user_id.user_id
+    return f'properties/{user_id}/images/{filename}'
+
+def property_video_upload_to(instance, filename):
+    # user_id = instance.property.user.id
+    user_id = instance.property.user_id.user_id
+    return f'properties/{user_id}/videos/{filename}'
+
+
+def property_file_upload_to(instance, filename):
+    # user_id = instance.property.user.id
+    user_id = instance.property.user_id.user_id
+    return f'properties/{user_id}/files/{filename}'
+
+
+class PropertyImage(models.Model):
+    property = models.ForeignKey(Property, related_name='images', on_delete=models.CASCADE)
+    image = models.ImageField(upload_to=property_image_upload_to)
+
+    def __str__(self):
+        return f"Image for {self.property}"
+
+
+class PropertyVideo(models.Model):
+    property = models.ForeignKey(Property, related_name='videos', on_delete=models.CASCADE)
+    video = models.FileField(upload_to=property_video_upload_to)
+
+    def __str__(self):
+        return f"Video for {self.property}"
+
+
+class PropertyFile(models.Model):
+    property = models.ForeignKey(Property, related_name='files', on_delete=models.CASCADE)
+    file = models.FileField(upload_to=property_file_upload_to)
+
+    def __str__(self):
+        return f"File for {self.property}"
+
+
+class EMIOption(models.Model):
+    property = models.ForeignKey('Property', on_delete=models.CASCADE, related_name="emi_options")
+    period_months = models.PositiveIntegerField()
+    emi_amount = models.DecimalField(max_digits=15, decimal_places=2, blank=True)
+
+    class Meta:
+        unique_together = ('property', 'period_months')  # prevents duplicate period for same property
+
+    
+    def save(self, *args, **kwargs):
+        if self.property and self.property.total_property_value and self.period_months:
+            # Subtract booking amount from total value before EMI calculation
+            loan_amount = self.property.total_property_value - (self.property.booking_amount or 0)
+            self.emi_amount = loan_amount / Decimal(self.period_months)
+        super().save(*args, **kwargs)
+
+
+    def __str__(self):
+        return f"{self.period_months} months - ₹{self.emi_amount:.2f}"
+
+
+
+class UserEMI(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    property = models.ForeignKey(Property, on_delete=models.CASCADE)
+    emi_option = models.ForeignKey(EMIOption, on_delete=models.CASCADE)
+    start_date = models.DateField()
+    end_date = models.DateField(blank=True, null=True)
+
+    def save(self, *args, **kwargs):
+        if self.start_date and self.emi_option:
+            self.end_date = self.start_date + relativedelta(months=self.emi_option.period_months)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.user} - {self.emi_option.period_months}M EMI for {self.property}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
