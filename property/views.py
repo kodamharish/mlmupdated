@@ -1,12 +1,18 @@
 # Create your views here.
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework import status
 from django.shortcuts import get_object_or_404
 from .models import *
 from .serializers import *
-from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
+from transactions.models import *
+from users.models import *
+from users.serializers import *
+from django.db.models import Q
+from django.db.models import Sum
+
 
 
 # ------------------ Property Category Views ------------------
@@ -132,11 +138,6 @@ class PropertyTypeByCategoryNameView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-
-
-
-
-
 # ------------------ Property Type by Category ID ------------------
 
 class PropertyTypeByCategoryIDView(APIView):
@@ -152,39 +153,9 @@ class PropertyTypeByCategoryIDView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-
-
-
-
-
-
-
-
 # ------------------ Property Views ------------------
-
-# class PropertyListCreateView(APIView):
-#     def get(self, request):
-#         try:
-#             properties = Property.objects.all()
-#             serializer = PropertySerializer(properties, many=True)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def post(self, request):
-#         try:
-#             serializer = PropertySerializer(data=request.data, context={'request': request})
-#             if serializer.is_valid():
-#                 serializer.save()
-#                 return Response(serializer.data, status=status.HTTP_201_CREATED)
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-
-
 class PropertyListCreateView(APIView):
-    
+
     def get(self, request):
         try:
             properties = Property.objects.all()
@@ -218,11 +189,86 @@ class PropertyListCreateView(APIView):
         try:
             serializer = PropertySerializer(data=request.data, context={'request': request})
             if serializer.is_valid():
-                serializer.save()
+                property_instance = serializer.save()
+                added_by = property_instance.user_id  # The user who added the property
+
+                # ✅ Fetch all users except the one who added the property
+                users_to_notify = User.objects.exclude(user_id=added_by.user_id)
+
+                # ✅ Create notification
+                notification = Notification.objects.create(
+                    message=f"New: {property_instance.property_title}",
+                    property=property_instance
+                )
+
+                # ✅ Link the notification to users
+                notification.visible_to_users.set(users_to_notify)
+
+                # ✅ Create per-user read tracking entries
+                UserNotificationStatus.objects.bulk_create([
+                    UserNotificationStatus(user=user, notification=notification, is_read=False)
+                    for user in users_to_notify
+                ])
+
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class GlobalNotificationListView(APIView):
+    def get(self, request, user_id):
+        try:
+            user = User.objects.get(user_id=user_id)
+
+            statuses = UserNotificationStatus.objects.filter(user=user).select_related('notification')
+
+            data = [
+                {
+                    "notification_id": s.notification.id,
+                    "notification_status_id": s.id,
+                    "message": s.notification.message,
+                    "property": {
+                        "id": s.notification.property.property_id,
+                        "title": s.notification.property.property_title
+                    },
+                    "created_at": s.notification.created_at,
+                    "is_read": s.is_read
+                }
+                for s in statuses.order_by('-notification__created_at')
+            ]
+            return Response(data, status=status.HTTP_200_OK)
+
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+
+
+class MarkNotificationReadView(APIView):
+    def post(self, request):
+        user_id = request.data.get('user_id')
+        notification_id = request.data.get('notification_id')
+
+        if not user_id or not notification_id:
+            return Response({'error': 'user_id and notification_id are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(user_id=user_id)
+
+            status_obj = UserNotificationStatus.objects.get(
+                user=user,
+                id=notification_id
+            )
+            status_obj.is_read = True
+            status_obj.save()
+
+            return Response({'message': 'Notification marked as read'}, status=status.HTTP_200_OK)
+
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        except UserNotificationStatus.DoesNotExist:
+            return Response({'error': 'Notification not found for user'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class PropertyDetailView(APIView):
@@ -256,21 +302,6 @@ class PropertyDetailView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-
-
-# class LatestPropertiesAPIView(APIView):
-#     def get(self, request):
-#         # Calculate the date one month ago from today
-#         one_month_ago = timezone.now() - timedelta(days=30)
-
-#         # Fetch all properties created in the last month
-#         new_properties = Property.objects.filter(created_at__gte=one_month_ago)
-
-#         # Serialize the properties (use the appropriate serializer for your properties)
-#         serializer = PropertySerializer(new_properties, many=True)
-
-#         return Response(serializer.data, status=status.HTTP_200_OK)
-
 
 
 
@@ -312,15 +343,6 @@ class PropertiesByUserID(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 
-# class PropertiesByApprovalStatus(APIView):
-#     def get(self, request, approval_status):
-#         try:
-#             properties = Property.objects.filter(approval_status=approval_status)
-#             serializer = PropertySerializer(properties, many=True)  # <-- FIXED HERE
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 
 class PropertiesByApprovalStatus(APIView):
@@ -359,18 +381,6 @@ class PropertiesByApprovalStatus(APIView):
 
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-# class PropertiesByStatus(APIView):
-#     def get(self, request, property_status):
-#         try:
-#             properties = Property.objects.filter(status=property_status)
-#             serializer = PropertySerializer(properties, many=True)  # <-- FIXED HERE
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
 
 
 class PropertiesByStatus(APIView):
@@ -414,13 +424,6 @@ class PropertiesByStatus(APIView):
 
 
 #Working with Counts
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from django.utils import timezone
-from datetime import timedelta
-from .models import Property, PropertyCategory, PropertyType
 
 class PropertyStatsAPIView(APIView):
     def get(self, request):
@@ -474,198 +477,6 @@ class PropertyStatsAPIView(APIView):
 
         return Response(data, status=status.HTTP_200_OK)
 
-
-#working with the property listing
-# from rest_framework.views import APIView
-# from rest_framework.response import Response
-# from rest_framework import status
-# from django.utils import timezone
-# from datetime import timedelta
-# from .models import Property, PropertyCategory, PropertyType
-# from .serializers import PropertySerializer
-
-# class PropertyStatsAPIView(APIView):
-#     def get(self, request):
-#         data = {}
-#         one_month_ago = timezone.now() - timedelta(days=30)
-
-#         # --- Category-wise Stats ---
-#         categories = PropertyCategory.objects.all()
-#         for category in categories:
-#             listing_qs = Property.objects.filter(category=category)
-#             latest_qs = listing_qs.filter(created_at__gte=one_month_ago)
-
-#             data[category.name] = {
-#                 "listing_count": listing_qs.count(),
-#                 "latest_count": latest_qs.count(),
-#                 "sold": listing_qs.filter(status="sold").count(),
-#                 "booked": listing_qs.filter(status="booked").count(),
-#                 "available": listing_qs.filter(status="available").count(),
-#                 "pending": listing_qs.filter(approval_status="pending").count(),
-#                 "approved": listing_qs.filter(approval_status="approved").count(),
-#                 "rejected": listing_qs.filter(approval_status="rejected").count(),
-#                 "listing_properties": PropertySerializer(listing_qs, many=True).data,
-#                 "latest_properties": PropertySerializer(latest_qs, many=True).data,
-#             }
-
-#         # --- Type-wise Stats ---
-#         types = PropertyType.objects.all()
-#         for prop_type in types:
-#             listing_qs = Property.objects.filter(property_type=prop_type)
-#             latest_qs = listing_qs.filter(created_at__gte=one_month_ago)
-
-#             data[prop_type.name] = {
-#                 "listing_count": listing_qs.count(),
-#                 "latest_count": latest_qs.count(),
-#                 "sold": listing_qs.filter(status="sold").count(),
-#                 "booked": listing_qs.filter(status="booked").count(),
-#                 "available": listing_qs.filter(status="available").count(),
-#                 "pending": listing_qs.filter(approval_status="pending").count(),
-#                 "approved": listing_qs.filter(approval_status="approved").count(),
-#                 "rejected": listing_qs.filter(approval_status="rejected").count(),
-#                 "listing_properties": PropertySerializer(listing_qs, many=True).data,
-#                 "latest_properties": PropertySerializer(latest_qs, many=True).data,
-#             }
-
-#         # --- Global Status Counts and Lists ---
-#         for status_value in ['sold', 'booked', 'available']:
-#             status_qs = Property.objects.filter(status=status_value)
-#             data[status_value] = {
-#                 "count": status_qs.count(),
-#                 "properties": PropertySerializer(status_qs, many=True).data
-#             }
-
-#         # --- Global Approval Status Counts and Lists ---
-#         for approval_value in ['pending', 'approved', 'rejected']:
-#             approval_qs = Property.objects.filter(approval_status=approval_value)
-#             data[approval_value] = {
-#                 "count": approval_qs.count(),
-#                 "properties": PropertySerializer(approval_qs, many=True).data
-#             }
-
-#         return Response(data, status=status.HTTP_200_OK)
-
-
-
-
-class PropertyStatsByUserAPIView_old(APIView):
-    def get(self, request, user_id):
-        data = {}
-        one_month_ago = timezone.now() - timedelta(days=30)
-
-        # Filter properties by user
-        user_properties = Property.objects.filter(user_id=user_id)
-
-        # Total listings
-        #data["listing"] = user_properties.count()
-
-        data["listing"] = {
-            "properties": {
-                "count": user_properties.count(),
-                "list": PropertySerializer(user_properties, many=True).data
-            }
-        }
-
-
-
-        # Latest listings in the last 30 days
-        latest_qs = user_properties.filter(created_at__gte=one_month_ago)
-        data["latest"] = {
-            "properties": {
-                "count": latest_qs.count(),
-                "list": PropertySerializer(latest_qs, many=True).data
-            }
-        }
-
-        # Status-wise data
-        for status_value in ['sold', 'booked', 'available']:
-            qs = user_properties.filter(status=status_value)
-            data[status_value] = {
-                "properties": {
-                    "count": qs.count(),
-                    "list": PropertySerializer(qs, many=True).data
-                }
-            }
-
-        # Approval status-wise data
-        for approval_status_value in ['pending', 'approved', 'rejected']:
-            qs = user_properties.filter(approval_status=approval_status_value)
-            data[approval_status_value] = {
-                "properties": {
-                    "count": qs.count(),
-                    "list": PropertySerializer(qs, many=True).data
-                }
-            }
-
-        return Response(data, status=status.HTTP_200_OK)
-
-
-from users.serializers import *
-from transactions.models import *
-from users.models import *
-from users.serializers import *
-
-
-class PropertyStatsByUserAPIView_old2(APIView):
-    def get(self, request, user_id):
-        data = {}
-        one_month_ago = timezone.now() - timedelta(days=30)
-
-        # All properties listed by the user
-        user_properties = Property.objects.filter(user_id=user_id)
-
-        # Total listings
-        data["listing"] = {
-            "properties": {
-                "count": user_properties.count(),
-                "list": PropertySerializer(user_properties, many=True).data
-            }
-        }
-
-        # Latest listings (last 30 days)
-        latest_qs = user_properties.filter(created_at__gte=one_month_ago)
-        data["latest"] = {
-            "properties": {
-                "count": latest_qs.count(),
-                "list": PropertySerializer(latest_qs, many=True).data
-            }
-        }
-
-        # Property status-wise data with buyer details
-        for status_value in ['sold', 'booked', 'available']:
-            qs = user_properties.filter(status=status_value)
-            serialized_props = []
-
-            for prop in qs:
-                prop_data = PropertySerializer(prop).data
-                if status_value in ['sold', 'booked']:
-                    user_prop_status = 'purchased' if status_value == 'sold' else 'booked'
-                    try:
-                        user_property = UserProperty.objects.get(property=prop, status=user_prop_status)
-                        buyer_data = UserSerializer(user_property.user).data
-                    except UserProperty.DoesNotExist:
-                        buyer_data = None
-                    prop_data["buyer_user"] = buyer_data
-                serialized_props.append(prop_data)
-
-            data[status_value] = {
-                "properties": {
-                    "count": qs.count(),
-                    "list": serialized_props
-                }
-            }
-
-        # Approval status-wise data
-        for approval_status_value in ['pending', 'approved', 'rejected']:
-            qs = user_properties.filter(approval_status=approval_status_value)
-            data[approval_status_value] = {
-                "properties": {
-                    "count": qs.count(),
-                    "list": PropertySerializer(qs, many=True).data
-                }
-            }
-
-        return Response(data, status=status.HTTP_200_OK)
 
 
 class PropertyStatsByUserAPIView(APIView):
@@ -739,6 +550,77 @@ class PropertyStatsByUserAPIView(APIView):
 
 
 
+class UniversalPropertySearchAPIView(APIView):
+    def get(self, request):
+        try:
+            query = request.query_params.get('q', '').strip()
+            looking_to = request.query_params.get('looking_to', '').strip().lower()
+
+            if not looking_to:
+                return Response({"error": "Query parameter `looking_to` is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            filters = Q(looking_to__iexact=looking_to)
+
+            if query:
+                filters &= (
+                    Q(property_id__icontains=query) |
+                    Q(property_title__icontains=query) |
+                    Q(description__icontains=query) |
+                    Q(address__icontains=query) |
+                    Q(city__icontains=query) |
+                    Q(state__icontains=query) |
+                    Q(country__icontains=query) |
+                    Q(pin_code__icontains=query) |
+                    Q(latitude__icontains=query) |
+                    Q(longitude__icontains=query) |
+                    Q(plot_area_sqft__icontains=query) |
+                    Q(builtup_area_sqft__icontains=query) |
+                    Q(length_ft__icontains=query) |
+                    Q(breadth_ft__icontains=query) |
+                    Q(number_of_floors__icontains=query) |
+                    Q(number_of_open_sides__icontains=query) |
+                    Q(number_of_roads__icontains=query) |
+                    Q(number_of_bedrooms__icontains=query) |
+                    Q(number_of_balconies__icontains=query) |
+                    Q(number_of_bathrooms__icontains=query) |
+                    Q(road_width_1_ft__icontains=query) |
+                    Q(road_width_2_ft__icontains=query) |
+                    Q(facing__icontains=query) |
+                    Q(ownership_type__icontains=query) |
+                    Q(property_value__icontains=query) |
+                    Q(total_property_value__icontains=query) |
+                    Q(booking_amount__icontains=query) |
+                    Q(property_uniqueness__icontains=query) |
+                    Q(location_advantages__icontains=query) |
+                    Q(other_features__icontains=query) |
+                    Q(owner_name__icontains=query) |
+                    Q(owner_contact__icontains=query) |
+                    Q(owner_email__icontains=query) |
+                    Q(role__icontains=query) |
+                    Q(username__icontains=query) |
+                    Q(referral_id__icontains=query) |
+                    Q(agent_commission__icontains=query) |
+                    Q(agent_commission_paid__icontains=query) |
+                    Q(agent_commission_balance__icontains=query) |
+                    Q(company_commission__icontains=query) |
+                    Q(remaining_company_commission__icontains=query) |
+                    Q(total_company_commission_distributed__icontains=query) |
+                    Q(company_commission_status__icontains=query) |
+                    Q(status__icontains=query) |
+                    Q(approval_status__icontains=query) |
+                    Q(category__name__icontains=query) |
+                    Q(property_type__name__icontains=query) |
+                    Q(user_id__username__icontains=query) |
+                    Q(user_id__email__icontains=query) |
+                    Q(amenities__name__icontains=query)
+                )
+
+            properties = Property.objects.filter(filters).distinct()
+            serializer = PropertySerializer(properties, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ------------------ Amenity Views ------------------
@@ -795,12 +677,7 @@ class AmenityDetailView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-
-
-
 #EMI 
-
-
 class EMIOptionListCreateAPIView(APIView):
     def get(self, request):
         options = EMIOption.objects.all()
@@ -836,11 +713,6 @@ class EMIOptionDetailAPIView(APIView):
         emi_option = self.get_object(pk)
         emi_option.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-
-
-
 
 
 class UserEMIListCreateAPIView(APIView):
@@ -880,11 +752,6 @@ class UserEMIDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-
-
-
-
-
 class BookingAmountSlabListCreateAPIView(APIView):
     def get(self, request):
         slabs = BookingAmountSlab.objects.all()
@@ -922,10 +789,68 @@ class BookingAmountSlabDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class CommissionSummaryAPIView(APIView):
+    def get(self, request, user_id=None):
+        try:
+            if user_id:
+                properties = Property.objects.filter(user_id=user_id)
 
+                totals = properties.aggregate(
+                    total_agent_commission=Sum('agent_commission'),
+                    total_agent_commission_paid=Sum('agent_commission_paid'),
+                    total_agent_commission_balance=Sum('agent_commission_balance'),
+                    total_company_commission=Sum('company_commission'),
+                    total_company_commission_paid=Sum('total_company_commission_distributed'),
+                    total_company_commission_balance=Sum('remaining_company_commission'),
+                )
 
+                for key in totals:
+                    totals[key] = totals[key] if totals[key] is not None else 0.00
 
+                return Response({
+                    'user_id': user_id,
+                    'total_agent_commission': totals['total_agent_commission'],
+                    'total_agent_commission_paid': totals['total_agent_commission_paid'],
+                    'total_agent_commission_balance': totals['total_agent_commission_balance'],
+                    'total_company_commission': totals['total_company_commission'],
+                    'total_company_commission_paid': totals['total_company_commission_paid'],
+                    'total_company_commission_balance': totals['total_company_commission_balance'],
+                }, status=status.HTTP_200_OK)
 
+            else:
+                user_summaries = []
+                user_ids = Property.objects.values_list('user_id', flat=True).distinct()
+
+                for uid in user_ids:
+                    user_properties = Property.objects.filter(user_id=uid)
+                    totals = user_properties.aggregate(
+                        total_agent_commission=Sum('agent_commission'),
+                        total_agent_commission_paid=Sum('agent_commission_paid'),
+                        total_agent_commission_balance=Sum('agent_commission_balance'),
+                        total_company_commission=Sum('company_commission'),
+                        total_company_commission_paid=Sum('total_company_commission_distributed'),
+                        total_company_commission_balance=Sum('remaining_company_commission'),
+                    )
+
+                    for key in totals:
+                        totals[key] = totals[key] if totals[key] is not None else 0.00
+
+                    user = User.objects.filter(pk=uid).first()
+                    user_summaries.append({
+                        'user_id': uid,
+                        'user_name': user.username if user else "Unknown",
+                        'total_agent_commission': totals['total_agent_commission'],
+                        'total_agent_commission_paid': totals['total_agent_commission_paid'],
+                        'total_agent_commission_balance': totals['total_agent_commission_balance'],
+                        'total_company_commission': totals['total_company_commission'],
+                        'total_company_commission_paid': totals['total_company_commission_paid'],
+                        'total_company_commission_balance': totals['total_company_commission_balance'],
+                    })
+
+                return Response(user_summaries, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 

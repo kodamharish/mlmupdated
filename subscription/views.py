@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 from .models import *
 from .serializers import *
 from users.models import *  # Import your custom user model if needed
+from transactions.models import *
 
 # ------------------ Subscription Plan ------------------
 
@@ -30,9 +31,6 @@ class SubscriptionPlanListCreateView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
 
 
 # ------------------ Subscription Plan ------------------
@@ -67,8 +65,6 @@ class SubscriptionPlanDetailView(APIView):
 
 
 # ------------------ Subscription Plan Variant ------------------
-
-
 # List and Create Plan Variants (e.g., Connect+ 45 days, Connect+ 90 days)
 class SubscriptionPlanVariantListCreateView(APIView):
     def get(self, request):
@@ -122,34 +118,19 @@ class SubscriptionPlanVariantDetailView(APIView):
         
 
 
-
-
-
 # ------------------ Subscription ------------------
-
-
 # Create Subscription for User
+
 class SubscriptionListCreateView(APIView):
     def get(self, request):
         try:
-            subcriptions = Subscription.objects.all()
-            serializer = SubscriptionSerializer(subcriptions, many=True)
+            subscriptions = Subscription.objects.all()
+            serializer = SubscriptionSerializer(subscriptions, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def post(self, request):
-        try:
-            serializer = SubscriptionSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {"message": "Subscription created successfully", "data": serializer.data},
-                    status=status.HTTP_201_CREATED
-                )
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
 
 
 class SubscriptionDetailView(APIView):
@@ -179,20 +160,6 @@ class SubscriptionDetailView(APIView):
             return Response({"message": "Subscription deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-
-
-# Get Subscriptions of a User
-# class UserSubscriptionsView(APIView):
-#     def get(self, request, user_id):
-#         try:
-#             subscription = Subscription.objects.get(user_id=user_id)
-#             serializer = SubscriptionSerializer(subscription)  # no many=True
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Subscription.DoesNotExist:
-#             return Response({'error': 'Subscription not found.'}, status=status.HTTP_404_NOT_FOUND)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 
 

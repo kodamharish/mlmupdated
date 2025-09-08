@@ -8,7 +8,7 @@ from dateutil.relativedelta import relativedelta
 class PropertyCategory(models.Model):
     property_category_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=50, unique=True)
-
+    created_at = models.DateTimeField(auto_now_add=True)
     def __str__(self):
         return self.name
 
@@ -16,7 +16,8 @@ class PropertyCategory(models.Model):
 class PropertyType(models.Model):
     property_type_id = models.AutoField(primary_key=True)
     category = models.ForeignKey(PropertyCategory, on_delete=models.CASCADE, related_name='types')
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.category.name} - {self.name}"
@@ -24,8 +25,8 @@ class PropertyType(models.Model):
 
 class Amenity(models.Model):
     amenity_id = models.AutoField(primary_key=True)
-    name = models.CharField(max_length=100)
-
+    name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
     def __str__(self):
         return self.name
     
@@ -35,6 +36,7 @@ class BookingAmountSlab(models.Model):
     min_value = models.DecimalField(max_digits=15, decimal_places=2)
     max_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # null means "above"
     booking_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         if self.max_value:
@@ -47,8 +49,9 @@ class BookingAmountSlab(models.Model):
 class Property(models.Model):
     LOOKING_TO_CHOICES = [
         ('sell', 'Sell'),
-        ('rent', 'Rent / Lease'),
-        ('pg', 'PG'),
+        # ('rent', 'Rent / Lease'),
+        ('rent', 'Rent'),
+        # ('pg', 'PG'),
     ]
 
     FACING_CHOICES = [
@@ -84,6 +87,8 @@ class Property(models.Model):
     breadth_ft = models.DecimalField(max_digits=7, decimal_places=2, blank=True, null=True)
     # Property Structure
     number_of_floors = models.PositiveIntegerField(blank=True, null=True)
+    floor = models.PositiveIntegerField(blank=True, null=True)
+    furnishing_status = models.CharField(max_length=100,blank=True, null=True)
     number_of_open_sides = models.PositiveIntegerField(blank=True, null=True)
     number_of_roads = models.PositiveIntegerField(blank=True, null=True)
     number_of_bedrooms = models.PositiveIntegerField(blank=True, null=True)
@@ -98,8 +103,17 @@ class Property(models.Model):
     property_value = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True, default=0.00)
     total_property_value = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True, default=0.00)
     booking_amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True, default=0.00)
+    property_value_without_booking_amount = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True, default=0.00)
+
+    # Rent/Lease Specific Fields
+    preferred_tenants = models.CharField(max_length=100, blank=True, null=True, help_text="e.g., Family, Bachelors, Company Lease")
+    rent_amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True, default=0.00)
+    deposit_amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True, default=0.00)
+    # available_from = models.DateField(blank=True, null=True)
+    available_from = models.CharField(max_length=100, blank=True, null=True)
+
     # Amenities
-    amenities = models.ManyToManyField(Amenity, blank=True)
+    amenities = models.ManyToManyField(Amenity, blank=True,null=True)
     # Additional Info
     property_uniqueness = models.TextField(blank=True, null=True)
     location_advantages = models.TextField(blank=True, null=True)
@@ -128,7 +142,7 @@ class Property(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     def save(self, *args, **kwargs):
-    # Step 1: Automatically calculate total property value
+        # Step 1: Automatically calculate total property value
         self.total_property_value = (
             Decimal(self.agent_commission or 0) +
             Decimal(self.company_commission or 0) +
@@ -148,7 +162,12 @@ class Property(models.Model):
         else:
             self.booking_amount = Decimal(0)
 
-        # Step 4: Save the object
+        # ✅ Step 4: Now calculate property_value_without_booking_amount correctly
+        self.property_value_without_booking_amount = (
+            Decimal(self.total_property_value or 0) - Decimal(self.booking_amount or 0)
+        )
+
+        # Step 5: Save the object
         super().save(*args, **kwargs)
 
 
@@ -235,8 +254,26 @@ class UserEMI(models.Model):
         return f"{self.user} - {self.emi_option.period_months}M EMI for {self.property}"
 
 
+class Notification(models.Model):
+    message = models.CharField(max_length=255)
+    property = models.ForeignKey('Property', on_delete=models.CASCADE, related_name='notifications')
+    created_at = models.DateTimeField(auto_now_add=True)
+    #is_read = models.BooleanField(default=False)
+    visible_to_users = models.ManyToManyField(User, related_name='notifications_visible_to')
+
+    def __str__(self):
+        return f"{self.message} - {self.property.property_title}"
 
 
+
+class UserNotificationStatus(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    notification = models.ForeignKey(Notification, on_delete=models.CASCADE)
+    is_read = models.BooleanField(default=False)
+    marked_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('user', 'notification')
 
 
 

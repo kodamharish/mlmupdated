@@ -11,6 +11,8 @@ admin.site.register(PropertyFile)
 admin.site.register(EMIOption)
 admin.site.register(UserEMI)
 admin.site.register(BookingAmountSlab)
+admin.site.register(Notification)
+admin.site.register(UserNotificationStatus)
 
 
 

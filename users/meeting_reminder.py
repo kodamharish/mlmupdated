@@ -8,7 +8,6 @@ from django.utils.timezone import localtime
 
 def meeting_reminder_loop():
     from .models import ScheduledMeeting
-
     #print("✅ Meeting reminder thread started.")
 
     while True:
@@ -16,9 +15,7 @@ def meeting_reminder_loop():
             now = localtime()  # Ensure timezone-aware now
             #reminder_start = (now + timedelta(minutes=5)).replace(second=0, microsecond=0)
             reminder_start = (now + timedelta(minutes=30)).replace(second=0, microsecond=0)
-
             reminder_end = reminder_start + timedelta(minutes=1)
-
             #print(f"⏰ Checking meetings scheduled between {reminder_start.time()} and {reminder_end.time()} on {reminder_start.date()}")
 
             meetings = ScheduledMeeting.objects.filter(
@@ -30,7 +27,6 @@ def meeting_reminder_loop():
             )
 
             #print(f"📅 Meetings found: {meetings.count()}")
-
             for meeting in meetings:
                 name = meeting.name or getattr(meeting.request, 'name', 'User')
                 email = meeting.email or getattr(meeting.request, 'email', None)
@@ -54,7 +50,6 @@ def meeting_reminder_loop():
                     f"Scheduled Time: {meeting.scheduled_time}\n\n"
                     f"Thank you!"
                 )
-
                 try:
                     send_mail(subject, message, settings.EMAIL_HOST_USER, [email], fail_silently=False)
                     #print(f"✅ Email sent to {email}")

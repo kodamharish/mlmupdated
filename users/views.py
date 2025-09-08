@@ -1,4 +1,3 @@
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -15,17 +14,14 @@ import random
 from django.core.mail import send_mail
 from django.utils.cache import caches
 from mlm.settings import *
+from PIL import Image
+from django.db.models import Count, Q, Sum
 
 # Use Django's cache framework to store OTP temporarily
 cache = caches['default']
 
 
-
-
-
-
-
-class LoginAPIView(APIView):
+class LoginAPIView_old(APIView):
     def post(self, request):
         email = request.data.get("email")
         password = request.data.get("password")
@@ -56,6 +52,87 @@ class LoginAPIView(APIView):
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
+
+
+
+
+
+import random
+from django.core.cache import cache
+from django.core.mail import send_mail
+from django.contrib.auth.hashers import check_password
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import User
+from django.conf import settings
+
+
+class LoginAPIView(APIView):
+    def post(self, request):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        if not email or not password:
+            return Response({"error": "Email and password are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+            if check_password(password, user.password):
+                # ✅ Generate OTP instead of logging in immediately
+                otp = random.randint(1000, 9999)
+                cache.set(f'otp_{email}', otp, timeout=300)  # store OTP for 5 min
+
+                send_mail(
+                    subject='Login OTP Verification',
+                    message=f'Your OTP for login is {otp}. It is valid for 5 minutes.',
+                    from_email=settings.EMAIL_HOST_USER,
+                    recipient_list=[email],
+                    fail_silently=False,
+                )
+
+                return Response({"message": "OTP sent to your registered email"}, status=status.HTTP_200_OK)
+            else:
+                return Response({"error": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
+
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+class VerifyOTPView(APIView):
+    def post(self, request):
+        email = request.data.get("email")
+        otp = request.data.get("otp")
+
+        if not email or not otp:
+            return Response({"error": "Email and OTP are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        stored_otp = cache.get(f'otp_{email}')
+        if stored_otp and str(stored_otp) == str(otp):
+            cache.delete(f'otp_{email}')  # remove OTP after use
+
+            try:
+                user = User.objects.get(email=email)
+                roles = user.roles.values_list('role_name', flat=True)
+
+                return Response(
+                    {
+                        "message": "Login successful",
+                        "user_id": user.user_id,
+                        "referral_id": user.referral_id,
+                        "referred_by": user.referred_by,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "email": user.email,
+                        "phone_number": user.phone_number,
+                        "roles": list(roles),
+                    },
+                    status=status.HTTP_200_OK
+                )
+            except User.DoesNotExist:
+                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({"error": "Invalid or expired OTP"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -130,6 +207,15 @@ class UserListCreateView(APIView):
         try:
             data = request.data.copy()
 
+            # Validate referred_by if provided
+            referred_by = data.get("referred_by")
+            if referred_by:
+                if not User.objects.filter(referral_id=referred_by).exists():
+                    return Response(
+                        {"error": "Invalid referral code: referred_by does not exist."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
             if "password" in data and not data["password"].startswith("pbkdf2_sha256$"):
                 data["password"] = make_password(data["password"])
 
@@ -140,21 +226,18 @@ class UserListCreateView(APIView):
             if serializer.is_valid():
                 user = serializer.save()
 
-
                 if agent_role and agent_role in user.roles.all():
                     agent_count = User.objects.filter(roles=agent_role).exclude(referral_id__isnull=True).exclude(user_id=user.user_id).count()
                     referral_id = f"SRP{str(agent_count + 1).zfill(6)}"
                     user.referral_id = referral_id
                     user.save(update_fields=['referral_id'])
 
-
                 return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 
 class UserDetailView(APIView):
@@ -170,8 +253,8 @@ class UserDetailView(APIView):
         try:
             user = get_object_or_404(User, user_id=user_id)
             data = request.data.copy()
-            if 'password' in data:
-                data['password'] = make_password(data['password'])  # Hash new password need to remove
+            # if 'password' in data:
+            #     data['password'] = make_password(data['password'])  # Hash new password need to remove
             serializer = UserSerializer(user, data=data, partial=True)
             if serializer.is_valid():
                 serializer.save()
@@ -213,29 +296,6 @@ class UsersByStatus(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 
-# class AgentsByReferralIdAPIView(APIView):
-#     def get(self, request, referral_id):
-#         try:
-#             users = User.objects.filter(referred_by=referral_id).order_by('created_at')
-#             active = users.filter(status__iexact='Active') 
-#             inactive = users.filter(status__iexact='Inactive')
-#             count = users.count()  # Total users
-#             active_count = users.filter(status__iexact='Active').count()  
-#             inactive_count = users.filter(status__iexact='Inactive').count()  
-
-#             serializer = UserSerializer(users, many=True)
-#             return Response({
-#                 "users": serializer.data,
-#                 "active_agents": serializer.data,
-#                 "users": serializer.data,
-#                 "total_agents": count,
-#                 "total_active_agents": active_count,
-#                 "total_inactive_agents": inactive_count
-#             }, status=200)
-#         except User.DoesNotExist:
-#             return Response({"error": f"Users with '{referral_id}' not found"}, status=404)
-
-
 
 class AgentsByReferralIdAPIView(APIView):
     def get(self, request, referral_id):
@@ -261,42 +321,12 @@ class AgentsByReferralIdAPIView(APIView):
 
 
 
-# class CountAPIView(APIView):
-#     def get(self, request):
-#         # Calculate the date one month ago from today
-#         one_month_ago = timezone.now() - timedelta(days=30)
-
-#         # Aggregate counts for users
-#         user_counts = User.objects.aggregate(
-#             # Role based counts
-#             total_admins=Count('user_id', filter=Q(roles__role_name__iexact='Admin'), distinct=True),
-#             total_clients=Count('user_id', filter=Q(roles__role_name__iexact='Client'), distinct=True),
-#             total_agents=Count('user_id', filter=Q(roles__role_name__iexact='Agent'), distinct=True),
-            
-#             # Active/Inactive counts (charfield comparison)
-#             total_active_users=Count('user_id', filter=Q(status__iexact="Active"), distinct=True),
-#             total_inactive_users=Count('user_id', filter=Q(status__iexact="Inactive"), distinct=True),
-#         )
-
-#         # Aggregate counts for properties
-#         property_counts = Property.objects.aggregate(
-#             total_properties=Count('property_id', distinct=True),
-#             total_latest_properties=Count('property_id', distinct=True, filter=Q(created_at__gte=one_month_ago)),
-#         )
-
-#         # Combine the counts
-#         counts = {**user_counts, **property_counts}
-
-#         return Response(counts, status=status.HTTP_200_OK)
-
-
 
 class CountAPIView(APIView):
     def get(self, request):
-        # Calculate the date one month ago from today
         one_month_ago = timezone.now() - timedelta(days=30)
 
-        # Aggregate counts for users
+        # User role & status counts
         user_counts = User.objects.aggregate(
             total_admins=Count('user_id', filter=Q(roles__role_name__iexact='Admin'), distinct=True),
             total_clients=Count('user_id', filter=Q(roles__role_name__iexact='Client'), distinct=True),
@@ -305,27 +335,45 @@ class CountAPIView(APIView):
             total_inactive_users=Count('user_id', filter=Q(status__iexact="Inactive"), distinct=True),
         )
 
-        # Aggregate counts for properties
+        # Property status & approval counts
         property_counts = Property.objects.aggregate(
             total_properties=Count('property_id', distinct=True),
             total_latest_properties=Count('property_id', filter=Q(created_at__gte=one_month_ago), distinct=True),
 
-            # Status-based counts
+            # Property status
             total_sold_properties=Count('property_id', filter=Q(status__iexact='Sold'), distinct=True),
             total_booked_properties=Count('property_id', filter=Q(status__iexact='Booked'), distinct=True),
             total_available_properties=Count('property_id', filter=Q(status__iexact='Available'), distinct=True),
 
-            # Approval status-based counts
+            # Property approval
             total_pending_properties=Count('property_id', filter=Q(approval_status__iexact='Pending'), distinct=True),
             total_approved_properties=Count('property_id', filter=Q(approval_status__iexact='Approved'), distinct=True),
             total_rejected_properties=Count('property_id', filter=Q(approval_status__iexact='Rejected'), distinct=True),
         )
 
-        # Combine the counts
-        counts = {**user_counts, **property_counts}
+        # Commission totals
+        commission_totals = Property.objects.aggregate(
+            total_agent_commission=Sum('agent_commission'),
+            total_agent_commission_paid=Sum('agent_commission_paid'),
+            total_agent_commission_balance=Sum('agent_commission_balance'),
+
+            total_company_commission=Sum('company_commission'),
+            total_company_commission_paid=Sum('total_company_commission_distributed'),
+            total_remaining_company_commission=Sum('remaining_company_commission'),
+        )
+
+        # Replace None with 0.00
+        for key in commission_totals:
+            commission_totals[key] = commission_totals[key] if commission_totals[key] is not None else 0.00
+
+        # Combine all counts
+        counts = {
+            **user_counts,
+            **property_counts,
+            **commission_totals,
+        }
 
         return Response(counts, status=status.HTTP_200_OK)
-
 
 class SendOTPView(APIView):
     def post(self, request):
@@ -357,7 +405,7 @@ class SendOTPView(APIView):
 
 
 
-class VerifyOTPView(APIView):
+class VerifyOTPView_old(APIView):
     def post(self, request):
         email = request.data.get('email')
         otp = request.data.get('otp')
@@ -438,11 +486,6 @@ class VerifyOTPAndResetPasswordView(APIView):
 
 
 # Meetings
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from django.shortcuts import get_object_or_404
-
 class MeetingRequestListCreateView(APIView):
     def get(self, request):
         try:
@@ -490,30 +533,6 @@ class MeetingRequestDetailView(APIView):
             return Response({"message": "Meeting request deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-# class ScheduledMeetingListCreateView(APIView):
-#     def get(self, request):
-#         try:
-#             meetings = ScheduledMeeting.objects.all().order_by('-scheduled_date')
-#             serializer = ScheduledMeetingSerializer(meetings, many=True)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def post(self, request):
-#         try:
-#             serializer = ScheduledMeetingSerializer(data=request.data)
-#             if serializer.is_valid():
-#                 meeting_request = serializer.validated_data['request']
-#                 meeting_request.is_scheduled = True
-#                 meeting_request.save()
-#                 serializer.save()
-#                 return Response({"message": "Meeting scheduled successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
 
 
 
@@ -589,16 +608,7 @@ class ScheduledMeetingDetailView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # def put(self, request, scheduled_meeting_id):
-    #     try:
-    #         meeting = get_object_or_404(ScheduledMeeting, scheduled_meeting_id=scheduled_meeting_id)
-    #         serializer = ScheduledMeetingSerializer(meeting, data=request.data,partial=True)
-    #         if serializer.is_valid():
-    #             serializer.save()
-    #             return Response(serializer.data, status=status.HTTP_200_OK)
-    #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    #     except Exception as e:
-    #         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     def put(self, request, scheduled_meeting_id):
         try:
             meeting = get_object_or_404(ScheduledMeeting, scheduled_meeting_id=scheduled_meeting_id)
@@ -662,3 +672,266 @@ class MeetingRequestsByUserIdAPIView(APIView):
         return Response(serializer.data)
     
 
+
+
+
+class LeadListCreateView(APIView):
+    def get(self, request):
+        try:
+            leads = Lead.objects.all()
+            serializer = LeadSerializer(leads, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        try:
+            serializer = LeadSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class LeadDetailView(APIView):
+    def get(self, request, id):
+        try:
+            lead = get_object_or_404(Lead, id=id)
+            serializer = LeadSerializer(lead)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def put(self, request, id):
+        try:
+            lead = get_object_or_404(Lead, id=id)
+            serializer = LeadSerializer(lead, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request, id):
+        try:
+            lead = get_object_or_404(Lead, id=id)
+            lead.delete()
+            return Response({"message": "Lead deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+
+
+class CarouselItemListCreateView(APIView):
+    def get(self, request):
+        try:
+            items = CarouselItem.objects.all()
+            serializer = CarouselItemSerializer(items, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        if 'image' not in request.FILES:
+            return Response({'error': 'Image file is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = CarouselItemSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+
+
+
+class CarouselItemDetailView(APIView):
+    def get(self, request, pk):
+        try:
+            item = get_object_or_404(CarouselItem, pk=pk)
+            serializer = CarouselItemSerializer(item)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def put(self, request, pk):
+        try:
+            item = get_object_or_404(CarouselItem, pk=pk)
+            serializer = CarouselItemSerializer(item, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request, pk):
+        try:
+            item = get_object_or_404(CarouselItem, pk=pk)
+            item.delete()
+            return Response({'message': 'Carousel item deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+class TrainingMaterialListCreateView(APIView):
+    def get(self, request):
+        try:
+            materials = TrainingMaterial.objects.all()
+            serializer = TrainingMaterialSerializer(materials, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        try:
+            serializer = TrainingMaterialSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class TrainingMaterialDetailView(APIView):
+    def get(self, request, id):
+        try:
+            material = get_object_or_404(TrainingMaterial, id=id)
+            serializer = TrainingMaterialSerializer(material)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def put(self, request, id):
+        try:
+            material = get_object_or_404(TrainingMaterial, id=id)
+            serializer = TrainingMaterialSerializer(material, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request, id):
+        try:
+            material = get_object_or_404(TrainingMaterial, id=id)
+            material.delete()
+            return Response({'message': 'Training material deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+class PhonenumberListCreateView(APIView):
+    def get(self, request):
+        try:
+            phone_numbers = Phonenumber.objects.all()
+            serializer = PhonenumberSerializer(phone_numbers, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        try:
+            serializer = PhonenumberSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PhonenumberDetailView(APIView):
+    def get(self, request, id):
+        try:
+            phone_number = get_object_or_404(Phonenumber, id=id)
+            serializer = PhonenumberSerializer(phone_number)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def put(self, request, id):
+        try:
+            phone_number = get_object_or_404(Phonenumber, id=id)
+            serializer = PhonenumberSerializer(phone_number, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request, id):
+        try:
+            phone_number = get_object_or_404(Phonenumber, id=id)
+            phone_number.delete()
+            return Response({'message': 'Phone number deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+
+# Business List & Create
+class BusinessListCreateView(APIView):
+    def get(self, request):
+        try:
+            businesses = Business.objects.all().order_by('-created_at')
+            serializer = BusinessSerializer(businesses, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        try:
+            serializer = BusinessSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    {"message": "Business created successfully", "data": serializer.data},
+                    status=status.HTTP_201_CREATED
+                )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Business Detail (GET, PUT, DELETE)
+class BusinessDetailView(APIView):
+    def get(self, request, business_id):
+        try:
+            business = get_object_or_404(Business, business_id=business_id)
+            serializer = BusinessSerializer(business)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def put(self, request, business_id):
+        try:
+            business = get_object_or_404(Business, business_id=business_id)
+            serializer = BusinessSerializer(business, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request, business_id):
+        try:
+            business = get_object_or_404(Business, business_id=business_id)
+            business.delete()
+            return Response({"message": "Business deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

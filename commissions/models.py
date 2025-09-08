@@ -12,22 +12,6 @@ class CommissionMaster(models.Model):
         return f"{self.id}"
 
 
-
-# class Commission(models.Model):
-#     commission_id = models.AutoField(primary_key=True)  # Primary key
-#     percentage = models.ForeignKey(CommissionMaster,on_delete=models.CASCADE, related_name='commissions')  # Commission percentage
-#     transaction_id = models.CharField(max_length=200,blank=True, null=True)
-#     agent_id = models.CharField(max_length=200,blank=True, null=True)
-#     agent_name = models.CharField(max_length=200,blank=True, null=True)
-#     amount = models.CharField(max_length=200,blank=True, null=True)
-#     referral_id = models.CharField(max_length=200,blank=True, null=True)
-#     property_id = models.CharField(max_length=200,blank=True, null=True)
-#     date = models.DateTimeField(auto_now_add=True)
-#     def __str__(self):
-#         return f"{self.commission_id}"
-    
-
-
 class Commission(models.Model):
     commission_id = models.AutoField(primary_key=True)
     percentage = models.ForeignKey(CommissionMaster, on_delete=models.CASCADE, related_name='company_commissions')

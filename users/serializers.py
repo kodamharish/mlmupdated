@@ -23,8 +23,6 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 
-
-
 class MeetingRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = MeetingRequest
@@ -37,3 +35,31 @@ class ScheduledMeetingSerializer(serializers.ModelSerializer):
 
 
 
+class LeadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Lead
+        fields = '__all__'
+
+
+class CarouselItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CarouselItem
+        fields = '__all__'
+
+
+class TrainingMaterialSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TrainingMaterial
+        fields = '__all__'
+
+
+class PhonenumberSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Phonenumber
+        fields = '__all__'
+
+
+class BusinessSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Business
+        fields = '__all__'

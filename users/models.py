@@ -1,4 +1,3 @@
-
 from django.db import models
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
@@ -25,19 +24,19 @@ class Role(models.Model):
 class User(models.Model):
     user_id = models.AutoField(primary_key=True)
     roles = models.ManyToManyField('Role')
-    username = models.CharField(max_length=100)
+    username = models.CharField(max_length=255)
     password = models.CharField(max_length=255)
-    first_name = models.CharField(max_length=50)
-    last_name = models.CharField(max_length=50)
-    email = models.EmailField()
-    phone_number = models.CharField(max_length=15)
+    first_name = models.CharField(max_length=255)
+    last_name = models.CharField(max_length=255)
+    email = models.EmailField(unique=True)
+    phone_number = models.CharField(max_length=15,unique=True)
     date_of_birth = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=20, null=True, blank=True)
     image = models.ImageField(upload_to=temp_directory_path, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
-    city = models.CharField(max_length=100, blank=True, null=True)
-    state = models.CharField(max_length=100, blank=True, null=True)
-    country = models.CharField(max_length=100, blank=True, null=True)
+    city = models.CharField(max_length=255, blank=True, null=True)
+    state = models.CharField(max_length=255, blank=True, null=True)
+    country = models.CharField(max_length=255, blank=True, null=True)
     pin_code = models.CharField(max_length=20, blank=True, null=True)
     #status = models.CharField(max_length=100, blank=True, null=True)
     status = models.CharField(max_length=100,default='inactive')
@@ -60,10 +59,6 @@ class User(models.Model):
     referred_by = models.CharField(max_length=20, blank=True, null=True)
     # level_no = models.CharField(max_length=20, blank=True, null=True)
     level_no = models.PositiveIntegerField(default=0)
-
-
-
-    
 
     def set_roles(self, roles):
         """Temporarily store roles to set after save."""
@@ -142,11 +137,6 @@ class User(models.Model):
         return f"{self.user_id}"
     
 
-
-
-
-
-
 class MeetingRequest(models.Model):
     request_id = models.AutoField(primary_key=True)
     user_id = models.ForeignKey(User, on_delete=models.CASCADE, related_name='agent_requests')
@@ -163,23 +153,6 @@ class MeetingRequest(models.Model):
     def __str__(self):
         return f"{self.name} → {self.profile_type} on {self.requested_date}"
 
-# class ScheduledMeeting(models.Model):
-#     scheduled_meeting_id = models.AutoField(primary_key=True)
-#     request = models.OneToOneField(MeetingRequest, on_delete=models.CASCADE)
-#     scheduled_date = models.DateField(blank=True, null=True)
-#     scheduled_time = models.TimeField(blank=True, null=True)
-#     meeting_link = models.URLField(blank=True, null=True)
-#     scheduled_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='scheduled_meetings')
-#     status_choices = [
-#         ('scheduled', 'Scheduled'),
-#         ('completed', 'Completed'),
-#         ('cancelled', 'Cancelled')
-#     ]
-#     status = models.CharField(max_length=20, choices=status_choices)
-#     notes = models.TextField(blank=True, null=True)
-
-#     def __str__(self):
-#         return f"{self.request.user_id} with {self.request.profile_type} on {self.scheduled_date}"
 
 class ScheduledMeeting(models.Model):
     scheduled_meeting_id = models.AutoField(primary_key=True)
@@ -201,11 +174,108 @@ class ScheduledMeeting(models.Model):
     status = models.CharField(max_length=20, choices=status_choices)
     notes = models.TextField(blank=True, null=True)
     reminder_sent = models.BooleanField(default=False,blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
 
     def __str__(self):
         return f"{self.request.user_id} with {self.request.profile_type} on {self.scheduled_date}"
 
 
+class Lead(models.Model):
+    id = models.AutoField(primary_key=True)
+    first_name = models.CharField(max_length=50)
+    last_name = models.CharField(max_length=50)
+    email = models.EmailField()
+    phone_number = models.CharField(max_length=15)
+    message = models.TextField(blank=True,null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.id}"
+
+
+class CarouselItem(models.Model):
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    image = models.ImageField(upload_to='carousel/')
+    link = models.URLField(blank=True)
+    order = models.PositiveIntegerField(default=0)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    def __str__(self):
+        return self.title
 
 
 
+
+class TrainingMaterial(models.Model):
+    title = models.CharField(max_length=255,blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    video = models.FileField(upload_to='training_materials/')
+    category  = models.CharField(max_length=255,blank=True, null=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    def __str__(self):
+        return self.title
+    
+
+class Phonenumber(models.Model):
+    name = models.CharField(max_length=255,blank=True, null=True)
+    phone_number = models.CharField(max_length=16,blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # def __str__(self):
+    #     return self.id
+
+    def __str__(self):
+        return f"{self.id}"
+    
+
+
+
+# class Business(models.Model):
+#     business_id = models.AutoField(primary_key=True)
+#     user_id = models.ForeignKey(User, on_delete=models.CASCADE, related_name='businesses')
+#     business_name = models.CharField(max_length=255, unique=True)
+#     business_type = models.CharField(max_length=100)  # Free text instead of choices
+#     description = models.TextField(blank=True, null=True)
+#     website = models.URLField(blank=True, null=True)
+#     email = models.EmailField(blank=True, null=True)
+#     phone = models.CharField(max_length=20, blank=True, null=True)
+#     address = models.TextField(blank=True, null=True)
+#     logo = models.ImageField(upload_to="business/logos/", blank=True, null=True)
+#     documents = models.FileField(upload_to="business/documents/", blank=True, null=True)
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     updated_at = models.DateTimeField(auto_now=True)
+#     is_active = models.BooleanField(default=True)
+
+#     def __str__(self):
+#         return f"{self.business_name} (User ID: {self.user_id})"
+
+
+def business_file_upload_to(instance, filename):
+    """
+    Save business logo/documents in a folder specific to the user_id.
+    Example: business/<user_id>/<filename>
+    """
+    user_id = instance.user_id.user_id  # FK to User
+    return f'business/{user_id}/{filename}'
+
+
+class Business(models.Model):
+    business_id = models.AutoField(primary_key=True)
+    user_id = models.ForeignKey(User, on_delete=models.CASCADE, related_name='businesses')
+    business_name = models.CharField(max_length=255, unique=True)
+    business_type = models.CharField(max_length=100)  # Free text instead of choices
+    description = models.TextField(blank=True, null=True)
+    website = models.URLField(blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    logo = models.ImageField(upload_to=business_file_upload_to, blank=True, null=True)
+    documents = models.FileField(upload_to=business_file_upload_to, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.business_name} (User ID: {self.user_id})"

@@ -8,10 +8,7 @@ class CommissionMasterSerializer(serializers.ModelSerializer):
         model = CommissionMaster
         fields = '__all__'
 
-# class CommissionSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Commission
-#         fields = '__all__'
+
 
 class CommissionSerializer(serializers.ModelSerializer):
     level_no = serializers.IntegerField(source='percentage.level_no', read_only=True)

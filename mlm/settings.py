@@ -29,6 +29,19 @@ DEBUG = True
 ALLOWED_HOSTS = ['*']
 
 
+# ALLOWED_HOSTS = ['*']
+
+# CSRF_TRUSTED_ORIGINS = [
+#     "https://shrirajteam.com",
+#     "https://shrirajteam.com:81",  # Add this line
+# ]
+
+# CORS_ALLOWED_ORIGINS = [
+#     "https://shrirajteam.com",
+#     "https://shrirajteam.com:81",
+# ]
+
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -63,6 +76,7 @@ MIDDLEWARE = [
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = True  
+
 
 ROOT_URLCONF = 'mlm.urls'
 
@@ -153,3 +167,19 @@ EMAIL_HOST_USER='asaikrishnachary@gmail.com'
 EMAIL_HOST_PASSWORD='zghy bjsk ddvi zaun'
 EMAIL_PORT=587
 EMAIL_USE_TLS = True
+
+
+
+# PHONEPE CONFIGURATION TEST KEYS
+PHONEPE_CLIENT_ID = "TEST-M23ONULY4QBKP_25061"
+PHONEPE_CLIENT_SECRET = "YjAyMGMyYTAtYjcwNC00ZDJlLWFiN2EtZjliMzUzZjE5NDg3"
+PHONEPE_CLIENT_VERSION = 1
+PHONEPE_ENVIRONMENT = "SANDBOX"  # use "PRODUCTION" when going live
+
+
+
+# PHONEPE CONFIGURATION PRODUCTION KEYS
+# PHONEPE_CLIENT_ID = "SU2506181840372419940625"
+# PHONEPE_CLIENT_SECRET = "1822bacb-5ec3-4c94-9eeb-b94ec92c19f8"
+# PHONEPE_CLIENT_VERSION = 1
+# PHONEPE_ENVIRONMENT = "PRODUCTION"  
